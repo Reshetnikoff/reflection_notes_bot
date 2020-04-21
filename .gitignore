@@ -1,0 +1,6 @@
+# Ignore users data
+users.csv
+# Ignore files in data
+data/*
+# Ignore .idea files
+.idea

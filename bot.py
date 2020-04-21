@@ -24,7 +24,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 conv_states = {
     "CHOOSING": 1,
     "TYPING": 2,
-    "EDIT": 3
+    "EDIT": 3,
+    "EDIT_EXIST_TASKS": 4
 }
 
 class RefNotesNot():
@@ -32,6 +33,8 @@ class RefNotesNot():
         self.users_file = "users.csv"
         self.data = "./data"
         self.bot = None
+
+        self.edit = True
 
         self.button_reply = dict()
         self.save_text = dict()
@@ -63,8 +66,9 @@ class RefNotesNot():
             entry_points=[CommandHandler("write_tasks", self.write_tasks)],
 
             states={
-                conv_states["TYPING"]: [MessageHandler(Filters.all, self.process_tasks_reply)],
-                conv_states["EDIT"]: [CallbackQueryHandler(self.edit_tasks)]
+                conv_states["TYPING"]: [MessageHandler(Filters.text, self.process_tasks_reply)],
+                conv_states["EDIT"]: [CallbackQueryHandler(self.edit_tasks)],
+                conv_states["EDIT_EXIST_TASKS"]: [CallbackQueryHandler(self.edit_exist_tasks)]
             },
 
             fallbacks=[CommandHandler('cancel', self.cancel)]
@@ -75,7 +79,7 @@ class RefNotesNot():
             entry_points=[CommandHandler("load_tasks", self.load_data)],
 
             states={
-                conv_states["TYPING"]: [MessageHandler(Filters.all,
+                conv_states["TYPING"]: [MessageHandler(Filters.text,
                                                        lambda x, y: self.process_load_data(x, y, category='tasks'))],
             },
 
@@ -153,12 +157,46 @@ class RefNotesNot():
 
     def write_tasks(self, update, context):
         chat_id = update.effective_chat.id
-        self.bot.send_message(chat_id=chat_id, text='Start write reflection. If you want to cancel type /cancel')
-        self.bot.send_message(chat_id=chat_id, text='Could you task type in format: \n1) Task #1\n2) Task  #2\n3)...')
+        user_id = update.effective_user.id
 
-        return conv_states["TYPING"]
+        data = pd.read_csv(f"{self.data}/{user_id}.csv", sep='\t', header=0, index_col=0)
 
-    def process_tasks_reply(self, update, context):
+        last_note = data.iloc[-1]
+        date_note = time.ctime(int(last_note['date']))
+        date_now = time.ctime(time.time())
+        # Тут может быть ошибка из-за того что долго не изменялись записи
+        if date_now.split(" ")[2] == date_note.split(" ")[2]:
+            self.save_text[user_id] = last_note["text"]
+            self.bot.send_message(chat_id=chat_id, text='You already have note today')
+            self.bot.send_message(chat_id=chat_id,
+                                  text=f'''You note is:\n{self.save_text[user_id]}\nAnd date is {date_note}''')
+
+            reply_markup = self.yes_no_buttom()
+
+            update.message.reply_text('Do you want to edit exists tasks?', reply_markup=reply_markup)
+
+            return conv_states["EDIT_EXIST_TASKS"]
+        else:
+            self.bot.send_message(chat_id=chat_id, text='Start write reflection. If you want to cancel type /cancel')
+            self.bot.send_message(chat_id=chat_id, text='Could you task type in format: \n1) Task #1\n2) Task  #2\n3)...')
+
+            return conv_states["TYPING"]
+
+    def edit_exist_tasks(self, update, context):
+        chat_id = update.effective_chat.id
+
+        if update.callback_query.data == '1':
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, now you can typing")
+            self.edit =True
+            return conv_states["TYPING"]
+        else:
+
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, note isn't changed")
+
+            return ConversationHandler.END
+
+
+    def process_tasks_reply(self, update, context, edit='Falses'):
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
 
@@ -167,12 +205,7 @@ class RefNotesNot():
         chat_id = update.effective_chat.id
         self.bot.send_message(chat_id=chat_id, text=f'You note is:\n{self.save_text[user_id]}')
 
-        keyboard = [[
-            InlineKeyboardButton("Yes", callback_data='1'),
-            InlineKeyboardButton("No", callback_data='2')
-        ]]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = self.yes_no_buttom()
 
         update.message.reply_text('Do you want to edit?', reply_markup=reply_markup)
 
@@ -181,12 +214,15 @@ class RefNotesNot():
     def edit_tasks(self, update, text):
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
-        print(update.callback_query.data)
+
         if update.callback_query.data == '1':
             self.bot.send_message(chat_id=chat_id, text=f"Ok, you could typing:")
             return conv_states["TYPING"]
         else:
             data = pd.read_csv(f"{self.data}/{user_id}.csv", sep='\t', header=0, index_col=0)
+            if self.edit == True:
+                data = data.iloc[:-1]
+                self.edit = False
             date = int(time.time())
             data = data.append({"date": date, "cat": "tasks", "subcat": "None", "text": self.save_text[user_id]},
                                 ignore_index=True)
@@ -202,13 +238,7 @@ class RefNotesNot():
         chat_id = update.effective_chat.id
         self.bot.send_message(chat_id=chat_id, text='Start write reflection. If you want to cancel type /cancel')
 
-        keyboard = [[
-                        InlineKeyboardButton("Ideas", callback_data='Ideas'),
-                        InlineKeyboardButton("Notes", callback_data='Notes'),
-                        InlineKeyboardButton("Emotions", callback_data='Emotions')
-                     ]]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = self.yes_no_buttom()
 
         update.message.reply_text('Please choose category:', reply_markup=reply_markup)
 
@@ -232,12 +262,7 @@ class RefNotesNot():
 
         self.bot.send_message(chat_id=chat_id, text=f'You note is:\n{self.save_text[user_id]}')
 
-        keyboard = [[
-            InlineKeyboardButton("Yes", callback_data='1'),
-            InlineKeyboardButton("No", callback_data='2')
-        ]]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = self.yes_no_buttom()
 
         update.message.reply_text('Do you want to edit?', reply_markup=reply_markup)
 
@@ -270,6 +295,15 @@ class RefNotesNot():
 
         return ConversationHandler.END
 
+    def yes_no_buttom(self):
+        keyboard = [[
+            InlineKeyboardButton("Yes", callback_data='1'),
+            InlineKeyboardButton("No", callback_data='2')
+        ]]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        return reply_markup
 
 if __name__ == "__main__":
     bot = RefNotesNot()

@@ -7,12 +7,12 @@ Clone directory:
 
 	git clone https://github.com/Reshetnikoff/reflection_notes_bot.git
 
-And write yout TOKEN, adress and port for proxy sock5h
+And write yout TOKEN, adress and port for proxy sock5h in config.py file
 
 
 ### Usage
 
-If you new users please enter command /start
+If you are new user please enter command /start
 
 ### Commands
 

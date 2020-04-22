@@ -9,13 +9,13 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Conversa
     MessageHandler, Filters
 import logging
 
-from config import config
+import config
 
 # params for config
-TOKEN = config["TOKEN"]
+TOKEN = config.config["TOKEN"]
 
 request_kwargs = {
-    'proxy_url': f'socks5h://{config["ADRESS"]}:{config["PORT"]}/'
+    'proxy_url': f'socks5h://{config.config["ADRESS"]}:{config.config["PORT"]}/'
 }
 
 # CONSTANT

@@ -446,7 +446,7 @@ class RefNotesNot():
         keyboard = [[
             InlineKeyboardButton("Notes", callback_data='Notes'),
             InlineKeyboardButton("Emotions", callback_data='Emotions'),
-            InlineKeyboardButton("Emotions", callback_data='Notes')
+            InlineKeyboardButton("Ideas", callback_data='Ideas')
         ]]
 
         reply_markup = InlineKeyboardMarkup(keyboard)

@@ -15,7 +15,12 @@ import config
 TOKEN = config.config["TOKEN"]
 
 request_kwargs = {
-    'proxy_url': f'socks5h://{config.config["ADRESS"]}:{config.config["PORT"]}/'
+    'proxy_url': f'socks5h://{config.config["ADRESS"]}:{config.config["PORT"]}/',
+
+    'urllib3_proxy_kwargs': {
+        'username': config.config["username"],
+        'password': config.config["password"],
+        }
 }
 
 # CONSTANT
@@ -42,9 +47,6 @@ class RefNotesNot():
     def __init__(self):
         self.users_file = "users.csv"
         self.data_file = "./data"
-
-        self.user_id = None
-        self.chat_id = None
 
         self.edit = False
 
@@ -153,39 +155,45 @@ class RefNotesNot():
         updater.start_polling()
 
     def start(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if self.users_file in os.listdir("./"):
-            users = pd.read_csv(self.users_file, sep='\t', header=None, index_col=None)
-            users = users[0].values
+            users = pd.read_csv(self.users_file, sep='\t', header=0, index_col=None)
         else:
-            users = []
-        if self.user_id not in users:
+            users = pd.DataFrame(columns=['users'])
+
+        if user_id not in users:
             user = update.effective_user
             context.bot.send_message(chat_id=update.effective_chat.id,
                                      text=f"Welcome {user.first_name} {user.last_name}")
-            users.append(self.user_id)
-            users = pd.DataFrame(users)
+            users = users.append({"users" : user_id}, ignore_index=True)
             data = pd.DataFrame(columns=["date", "cat", "subcat", "text"])
-            users.to_csv(self.users_file, sep='\t', index=False, header=False)
-            data.to_csv(f"{self.data_file}/{self.user_id}.csv", sep='\t', header=True, index=True)
+            users.to_csv(self.users_file, sep='\t', index=False, header=True)
+            data.to_csv(f"{self.data_file}/{user_id}.csv", sep='\t', header=True, index=True)
         else:
-            context.bot.send_message(chat_id=update.effective_chat.id, text="You have been registered yet!")
+            print(user_id)
+            context.bot.send_message(chat_id=chat_id, text="You have been registered yet!")
 
     '''
         Function for manipulate dates
     '''
 
-    def load_data(self):
-        data = pd.read_csv(f"{self.data_file}/{self.user_id}.csv", sep='\t', header=0, index_col=0)
+    def load_data(self, update):
+        chat_id, user_id = self.get_id(update)
+
+        data = pd.read_csv(f"{self.data_file}/{user_id}.csv", sep='\t', header=0, index_col=0)
         data = data.astype({"date": np.int32})
         return data
 
-    def save_data(self, data):
-        data.to_csv(f"{self.data_file}/{self.user_id}.csv", sep='\t', header=True, index=True)
+    def save_data(self, data, update):
+        chat_id, user_id = self.get_id(update)
 
-    def save_temp_data(self, data):
-        data.to_csv(f"{self.data_file}/{self.user_id}_temp.csv", sep='\t', header=True, index=True)
+        data.to_csv(f"{self.data_file}/{user_id}.csv", sep='\t', header=True, index=True)
+
+    def save_temp_data(self, data, update):
+        chat_id, user_id = self.get_id(update)
+
+        data.to_csv(f"{self.data_file}/{user_id}_temp.csv", sep='\t', header=True, index=True)
 
     def append_data(self, data, text, cat, subcat):
         date = int(time.time())
@@ -199,9 +207,11 @@ class RefNotesNot():
         else:
             return data[data['cat'] == cat].iloc[-1]
 
-    def send_temp_file(self):
-        f = open(f"{self.data_file}/{self.user_id}_temp.csv", 'rb')
-        self.bot.send_document(chat_id=self.chat_id, document=f)
+    def send_temp_file(self, update):
+        chat_id, user_id = self.get_id(update)
+        
+        f = open(f"{self.data_file}/{user_id}_temp.csv", 'rb')
+        self.bot.send_document(chat_id=chat_id, document=f)
         f.close()
 
     '''
@@ -209,12 +219,12 @@ class RefNotesNot():
     '''
 
     def write_results(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        data = self.load_data()
+        data = self.load_data(update)
 
         if len(data[data['cat'] == 'tasks']) == 0:
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id=chat_id,
                                   text='You have not written anything in your data!')
             return ConversationHandler.END
         else:
@@ -226,12 +236,12 @@ class RefNotesNot():
                 last_results = self.get_last_note(data, 'results')
                 last_results_index = data[data["cat"] == 'tasks'].index[-1]
                 if int(last_results['subcat']) == last_results_index:
-                    self.bot.send_message(chat_id=self.chat_id, text=f"You already write results")
+                    self.bot.send_message(chat_id=chat_id, text=f"You already write results")
                     reply_markup = self.yes_no_buttom()
                     update.message.reply_text('Do you want to edit it?', reply_markup=reply_markup)
                     return conv_states["EXIST_TASKS"]
 
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id=chat_id,
                                   text=f'Your last list of tasks:\n{text}\n{date}')
             reply_markup = self.yes_no_buttom()
 
@@ -240,57 +250,57 @@ class RefNotesNot():
             return conv_states['CHOOSING']
 
     def answer_to_edit_results(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, now you can typing")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, now you can typing")
             self.edit = True
             return conv_states["TYPING"]
         else:
 
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, note isn't changed")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, note isn't changed")
 
             return ConversationHandler.END
 
     def choose_results(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, now you can typing")
-            self.bot.send_message(chat_id=self.chat_id, text=f"Please, do it in format like you wrote tasks")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, now you can typing")
+            self.bot.send_message(chat_id=chat_id, text=f"Please, do it in format like you wrote tasks")
             return conv_states["TYPING"]
         else:
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, cancel of operation")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, cancel of operation")
             return ConversationHandler.END
 
     def typing_result(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.save_text[self.user_id] = update.message.text
+        self.save_text[user_id] = update.message.text
 
-        data = self.load_data()
+        data = self.load_data(update)
 
         last_tasks = self.get_last_note(data, 'tasks')
         text = last_tasks["text"]
 
-        if len(text.split("\n")) == len(self.save_text[self.user_id].split("\n")):
+        if len(text.split("\n")) == len(self.save_text[user_id].split("\n")):
             reply_markup = self.yes_no_buttom()
 
             update.message.reply_text('Do you want to edit?', reply_markup=reply_markup)
             return conv_states['EDIT']
         else:
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id=chat_id,
                                   text=f"Number of result is not equal number of tasks!\nDo it again:")
             return conv_states["TYPING"]
 
     def edit_results(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, now you can typing")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, now you can typing")
             return conv_states["TYPING"]
         else:
-            data = self.load_data()
+            data = self.load_data(update)
             last_tasks_index = data[data["cat"] == 'tasks'].index[-1]
             last_results_index = data[data["cat"] == 'tasks'].index[-1]
             if self.edit == True:
@@ -298,11 +308,11 @@ class RefNotesNot():
                 self.edit = False
 
             data = self.append_data(data=data, cat="results", subcat=last_tasks_index,
-                                    text=self.save_text[self.user_id])
+                                    text=self.save_text[user_id])
 
-            self.save_data(data)
+            self.save_data(data, update)
 
-            self.bot.send_message(chat_id=self.chat_id, text=f"Good! Your result is saved")
+            self.bot.send_message(chat_id=chat_id, text=f"Good! Your result is saved")
 
             return ConversationHandler.END
 
@@ -311,30 +321,30 @@ class RefNotesNot():
     '''
 
     def load_table(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.bot.send_message(chat_id=self.chat_id,
+        self.bot.send_message(chat_id=chat_id,
                               text='Ok, how many days do you want upload?. If you want to cancel type /cancel')
         return conv_states["TYPING"]
 
     def process_load_table(self, update, context, category):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.save_text[self.user_id] = update.message.text
+        self.save_text[user_id] = update.message.text
 
-        if not (self.save_text[self.user_id].isdigit()):
-            self.bot.send_message(chat_id=self.chat_id,
+        if not (self.save_text[user_id].isdigit()):
+            self.bot.send_message(chat_id=chat_id,
                                   text='It is not number. Please try again!')
             return conv_states["TYPING"]
         else:
-            data = self.load_data()
+            data = self.load_data(update)
             data = data[data["cat"] == category]
-            last_time = int(time.time()) - int(self.save_text[self.user_id]) * MIN * HOURS * SEC
+            last_time = int(time.time()) - int(self.save_text[user_id]) * MIN * HOURS * SEC
             data = data[data['date'] > last_time]
 
-            self.save_temp_data(data)
+            self.save_temp_data(data, update)
 
-            self.send_temp_file()
+            self.send_temp_file(update)
 
             return ConversationHandler.END
 
@@ -343,15 +353,15 @@ class RefNotesNot():
     '''
 
     def write_tasks(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        data = self.load_data()
+        data = self.load_data(update)
 
         last_note = self.get_last_note(data, 'tasks')
-        if len(last_note) > 0:
-            self.bot.send_message(chat_id=self.chat_id,
+        if len(last_note) == 0:
+            self.bot.send_message(chat_id,
                                   text='Start write reflection. If you want to cancel type /cancel')
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id,
                                   text='Could you /task type in format: \n1) Task #1\n2) Task  #2\n3)...')
 
             return conv_states["TYPING"]
@@ -361,10 +371,10 @@ class RefNotesNot():
         # Тут может быть ошибка из-за того что долго не изменялись записи
 
         if date_now.split(" ")[2] == date_note.split(" ")[2]:
-            self.save_text[self.user_id] = last_note["text"]
-            self.bot.send_message(chat_id=self.chat_id, text='You already have note today')
-            self.bot.send_message(chat_id=self.chat_id,
-                                  text=f'''You note is:\n{self.save_text[self.user_id]}\nAnd date is {date_note}''')
+            self.save_text[user_id] = last_note["text"]
+            self.bot.send_message(chat_id=chat_id, text='You already have note today')
+            self.bot.send_message(chat_id=chat_id,
+                                  text=f'''You note is:\n{self.save_text[user_id]}\nAnd date is {date_note}''')
 
             reply_markup = self.yes_no_buttom()
 
@@ -372,33 +382,32 @@ class RefNotesNot():
 
             return conv_states["EDIT_EXIST_TASKS"]
         else:
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id=chat_id,
                                   text='Start write reflection. If you want to cancel type /cancel')
-            self.bot.send_message(chat_id=self.chat_id,
+            self.bot.send_message(chat_id=chat_id,
                                   text='Could you task type in format: \n1) Task #1\n2) Task  #2\n3)...')
 
             return conv_states["TYPING"]
 
     def edit_exist_tasks(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, now you can typing")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, now you can typing")
             self.edit = True
             return conv_states["TYPING"]
         else:
 
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, note isn't changed")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, note isn't changed")
 
             return ConversationHandler.END
 
     def process_tasks_reply(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.save_text[self.user_id] = update.message.text
+        self.save_text[user_id] = update.message.text
 
-        chat_id = update.effective_chat.id
-        self.bot.send_message(chat_id=chat_id, text=f'You note is:\n{self.save_text[self.user_id]}')
+        self.bot.send_message(chat_id=chat_id, text=f'You note is:\n{self.save_text[user_id]}')
 
         reply_markup = self.yes_no_buttom()
 
@@ -407,21 +416,21 @@ class RefNotesNot():
         return conv_states["EDIT"]
 
     def edit_tasks(self, update, text):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, you could typing:")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, you could typing:")
             return conv_states["TYPING"]
         else:
-            data = self.load_data()
+            data = self.load_data(update)
             if self.edit == True:
                 data = data[data.index != (data[data["cat"] == 'tasks'].index[-1])]
                 self.edit = False
 
-            data = self.append_data(data=data, text=self.save_text[self.user_id], cat='tasks', subcat='None')
-            self.save_data(data)
+            data = self.append_data(data=data, text=self.save_text[user_id], cat='tasks', subcat='None')
+            self.save_data(data, update)
 
-            self.bot.send_message(chat_id=self.chat_id, text=f"Good! Your tasks is saved")
+            self.bot.send_message(chat_id=chat_id, text=f"Good! Your tasks is saved")
 
             return ConversationHandler.END
 
@@ -430,8 +439,9 @@ class RefNotesNot():
     '''
 
     def write_reflection(self, update, context):
-        self.check_users(update)
-        self.bot.send_message(chat_id=self.chat_id, text='Start write reflection. If you want to cancel type /cancel')
+        chat_id, user_id = self.get_id(update)
+
+        self.bot.send_message(chat_id=chat_id, text='Start write reflection. If you want to cancel type /cancel')
 
         keyboard = [[
             InlineKeyboardButton("Notes", callback_data='Notes'),
@@ -446,20 +456,20 @@ class RefNotesNot():
         return conv_states["CHOOSING"]
 
     def write_your_choose(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.subcat[self.user_id] = update.callback_query.data
+        self.subcat[user_id] = update.callback_query.data
 
-        self.bot.send_message(chat_id=self.chat_id, text=f"Type your notes:")
+        self.bot.send_message(chat_id=chat_id, text=f"Type your notes:")
 
         return conv_states["TYPING"]
 
     def process_reflection_reply(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.save_text[self.user_id] = update.message.text
+        self.save_text[user_id] = update.message.text
 
-        self.bot.send_message(chat_id=self.chat_id, text=f'You note is:\n{self.save_text[self.user_id]}')
+        self.bot.send_message(chat_id=chat_id, text=f'You note is:\n{self.save_text[user_id]}')
 
         reply_markup = self.yes_no_buttom()
 
@@ -468,19 +478,19 @@ class RefNotesNot():
         return conv_states["EDIT"]
 
     def edit_ref(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
         if update.callback_query.data == '1':
-            self.bot.send_message(chat_id=self.chat_id, text=f"Ok, you could typing:")
+            self.bot.send_message(chat_id=chat_id, text=f"Ok, you could typing:")
             return conv_states["TYPING"]
         else:
-            data = self.load_data()
+            data = self.load_data(update)
             date = int(time.time())
-            data = self.append_data(data=data, text=self.save_text[self.user_id], cat='reflection',
-                                    subcat=self.subcat[self.user_id])
-            self.save_data(data)
+            data = self.append_data(data=data, text=self.save_text[user_id], cat='reflection',
+                                    subcat=self.subcat[user_id])
+            self.save_data(data, update)
 
-            self.bot.send_message(chat_id=self.chat_id, text=f"Good! Your tasks is saved")
+            self.bot.send_message(chat_id=chat_id, text=f"Good! Your tasks is saved")
 
             return ConversationHandler.END
 
@@ -489,9 +499,9 @@ class RefNotesNot():
     '''
 
     def cancel(self, update, context):
-        self.check_users(update)
+        chat_id, user_id = self.get_id(update)
 
-        self.bot.send_message(chat_id=self.chat_id, text='You cancel typing!')
+        self.bot.send_message(chat_id=chat_id, text='You cancel typing!')
 
         return ConversationHandler.END
 
@@ -505,14 +515,10 @@ class RefNotesNot():
 
         return reply_markup
 
-    def check_users(self, update):
-        if self.user_id == None or self.chat_id == None:
-            self.chat_id = update.effective_chat.id
-            self.user_id = update.effective_user.id
-            return -1
-        else:
-            return 0
-
+    def get_id(self, update):
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        return chat_id, user_id
 
 if __name__ == "__main__":
     bot = RefNotesNot()
